@@ -445,7 +445,12 @@ def main():
     
     if not args.summary_only:
         if args.show_plots:
-            # Generate and show plots
+            # Generate, save, and show plots
+            logger.info(f"Generating and saving plots to {args.output_dir}/")
+            visualizer.generate_all_plots(args.output_dir)
+            
+            # Also show plots interactively
+            logger.info("Displaying plots interactively...")
             visualizer.plot_indexing_metrics()
             visualizer.plot_latency_analysis()
             visualizer.plot_throughput_scaling()
@@ -453,7 +458,7 @@ def main():
             visualizer.plot_latency_vs_quality()
             visualizer.create_performance_heatmap()
         else:
-            # Generate and save plots
+            # Generate and save plots only
             visualizer.generate_all_plots(args.output_dir)
 
 
