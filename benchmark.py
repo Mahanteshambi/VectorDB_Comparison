@@ -14,6 +14,7 @@ import numpy as np
 from vdb_comparison.data_management import VectorDataManager, DatabaseIndexer
 from vdb_comparison.search_engines import SearchEngineManager
 from vdb_comparison.metrics import MetricsCalculator
+from vdb_comparison.evaluation import MSMarcoEvaluator
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -27,18 +28,26 @@ class VectorDatabaseBenchmark:
                  num_queries: int = 1000,
                  vector_dim: int = 1024,
                  model_name: str = "intfloat/e5-large-v2",
-                 use_ms_marco: bool = True):
+                 use_ms_marco: bool = True,
+                 enable_evaluation: bool = False):
         self.num_vectors = num_vectors
         self.num_queries = num_queries
         self.vector_dim = vector_dim
         self.model_name = model_name
         self.use_ms_marco = use_ms_marco
+        self.enable_evaluation = enable_evaluation
         
         # Initialize modular components
         self.data_manager = VectorDataManager(model_name, vector_dim, use_ms_marco)
         self.indexer = DatabaseIndexer()
         self.search_manager = SearchEngineManager()
         self.metrics_calculator = MetricsCalculator()
+        
+        # Initialize evaluator if evaluation is enabled
+        if self.enable_evaluation and self.use_ms_marco:
+            self.evaluator = MSMarcoEvaluator(model_name)
+        else:
+            self.evaluator = None
         
     def run_benchmark(self):
         """Run the complete benchmark suite"""
@@ -53,6 +62,21 @@ class VectorDatabaseBenchmark:
         # Compute ground truth using FAISS
         logger.info("Computing ground truth with FAISS...")
         ground_truth = self.data_manager.compute_ground_truth(k=10)
+        
+        # Extract MS MARCO ground truth if evaluation is enabled
+        ms_marco_ground_truth = None
+        if self.enable_evaluation and self.evaluator:
+            logger.info("Extracting MS MARCO ground truth for evaluation...")
+            try:
+                self.evaluator.load_model()
+                ms_marco_ground_truth = self.evaluator.extract_ground_truth(
+                    num_queries=self.num_queries, 
+                    num_passages=self.num_vectors
+                )
+                logger.info(f"Extracted ground truth for {len(ms_marco_ground_truth)} queries")
+            except Exception as e:
+                logger.error(f"Failed to extract MS MARCO ground truth: {e}")
+                self.enable_evaluation = False
         
         # Connect to databases and index data
         self.indexer.connect_databases()
@@ -135,6 +159,11 @@ class VectorDatabaseBenchmark:
         else:
             logger.info("Skipping quality metrics computation (no ground truth available)")
         
+        # Run MS MARCO evaluation if enabled
+        if self.enable_evaluation and ms_marco_ground_truth and self.evaluator:
+            logger.info("Running MS MARCO evaluation...")
+            self._run_ms_marco_evaluation(single_thread_results, ms_marco_ground_truth)
+        
         # Save results and print summary
         self.metrics_calculator.save_results()
         self.metrics_calculator.print_summary()
@@ -144,6 +173,56 @@ class VectorDatabaseBenchmark:
         self.search_manager.close_connections()
         
         logger.info("Benchmark completed!")
+    
+    def _run_ms_marco_evaluation(self, search_results: Dict[str, Tuple], ground_truth: Dict[str, List[str]]):
+        """Run MS MARCO evaluation for all search engines"""
+        logger.info("Evaluating search results against MS MARCO ground truth...")
+        
+        # Get query texts for evaluation
+        query_texts = list(ground_truth.keys())[:self.num_queries]
+        
+        for engine_name, (_, search_results_list) in search_results.items():
+            if not search_results_list:
+                continue
+                
+            logger.info(f"Evaluating {engine_name}...")
+            
+            # Convert search results to the format expected by evaluator
+            # Map vector IDs back to actual passage texts
+            results_dict = {}
+            
+            for i, query_text in enumerate(query_texts):
+                if i < len(search_results_list) and i < len(self.data_manager.query_texts):
+                    # Get the actual query text from our stored data
+                    actual_query_text = self.data_manager.query_texts[i]
+                    
+                    # Map vector IDs to actual passage texts
+                    retrieved_passages = []
+                    for vid in search_results_list[i]:
+                        if 0 <= vid < len(self.data_manager.passage_texts):
+                            retrieved_passages.append(self.data_manager.passage_texts[vid])
+                    
+                    # Use the actual query text from our data, not the ground truth key
+                    results_dict[actual_query_text] = retrieved_passages
+            
+            # Evaluate using the evaluator
+            try:
+                metrics = self.evaluator.evaluate_retrieval_results(results_dict, ground_truth)
+                
+                # Add evaluation metrics to results
+                for metric_name, value in metrics.items():
+                    self.metrics_calculator.add_results([{
+                        'database': engine_name,
+                        'operation': 'evaluation',
+                        'metric': metric_name,
+                        'value': value,
+                        'worker_count': 1
+                    }])
+                
+                logger.info(f"{engine_name} evaluation completed")
+                
+            except Exception as e:
+                logger.error(f"Failed to evaluate {engine_name}: {e}")
 
 def main():
     parser = argparse.ArgumentParser(description="Vector Database Benchmark")
@@ -156,6 +235,8 @@ def main():
                        help="Use synthetic data instead of MS MARCO")
     parser.add_argument("--max-marco-samples", type=int, default=10000,
                        help="Maximum number of MS MARCO samples to load (default: 10000)")
+    parser.add_argument("--enable-evaluation", action="store_true",
+                       help="Enable MS MARCO evaluation with ground truth (default: False)")
     
     args = parser.parse_args()
     
@@ -172,7 +253,8 @@ def main():
         num_vectors=args.vectors,
         num_queries=args.queries,
         model_name=args.model,
-        use_ms_marco=use_ms_marco
+        use_ms_marco=use_ms_marco,
+        enable_evaluation=args.enable_evaluation
     )
     
     benchmark.run_benchmark()

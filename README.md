@@ -6,6 +6,8 @@ A comprehensive benchmark suite comparing **Postgres with pgvector**, **Weaviate
 
 - **Modular Architecture**: Clean separation of data management, search engines, and metrics calculation
 - **Comprehensive Metrics**: Index build time, memory usage, latency percentiles, throughput scaling, recall, mAP, and NDCG
+- **MS MARCO Evaluation**: Real-world evaluation using MS MARCO dataset with ground truth extraction
+- **Quality Assessment**: Recall@K (K=1,5,10,20) and Mean Reciprocal Rank (MRR) metrics
 - **Multi-threaded Testing**: Performance evaluation with 1, 4, 8, and 16 workers
 - **Docker Integration**: Easy setup with Docker Compose for all databases
 - **Rich Visualizations**: Automated generation of performance charts and heatmaps
@@ -27,6 +29,7 @@ vdb_comparison/
 ├── data_management.py        # Vector generation and database indexing
 ├── search_engines.py         # Database search implementations
 ├── metrics.py               # Performance and quality calculations
+├── evaluation.py            # MS MARCO evaluation and ground truth extraction
 ├── visualize_results.py     # Results visualization and analysis
 ├── docker-compose.yml       # Database services configuration
 ├── init_postgres.sql        # PostgreSQL initialization script
@@ -105,6 +108,32 @@ python benchmark.py --vectors 100000 --queries 1000 --use-synthetic
 uv run benchmark --vectors 200000 --queries 2000
 ```
 
+**With MS MARCO evaluation**:
+```bash
+uv run benchmark --vectors 10000 --queries 100 --use-ms-marco --enable-evaluation
+```
+
+### Evaluation Features
+
+The benchmark now includes comprehensive evaluation capabilities using the MS MARCO dataset:
+
+- **Ground Truth Extraction**: Automatically extracts relevant passages using the `is_selected` field
+- **Quality Metrics**: 
+  - Recall@K (K=1, 5, 10, 20): Measures how many relevant documents are found in top-K results
+  - Mean Reciprocal Rank (MRR): Measures the rank of the first relevant document
+- **Real-world Data**: Uses actual MS MARCO queries and passages for realistic evaluation
+- **Sampled Evaluation**: Supports evaluation on subsets for faster testing
+
+**Example evaluation results**:
+```
+MS MARCO Evaluation:
+  RECALL@1: 0.2000
+  RECALL@5: 0.8000
+  RECALL@10: 0.8000
+  RECALL@20: 0.8000
+  MRR: 0.4400
+```
+
 ### Available Parameters
 
 - `--vectors`: Number of vectors to index (default: 100,000)
@@ -112,6 +141,8 @@ uv run benchmark --vectors 200000 --queries 2000
 - `--model`: Sentence transformer model (default: intfloat/e5-large-v2)
 - `--use-ms-marco`: Use MS MARCO dataset (default: True)
 - `--use-synthetic`: Use synthetic data instead of MS MARCO
+- `--enable-evaluation`: Enable MS MARCO evaluation with ground truth (default: False)
+- `--max-marco-samples`: Maximum MS MARCO samples to load (default: 10,000)
 
 ### Visualizing Results
 

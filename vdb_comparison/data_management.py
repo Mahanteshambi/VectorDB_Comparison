@@ -35,6 +35,8 @@ class VectorDataManager:
         self.embeddings = None
         self.query_embeddings = None
         self.ground_truth = None
+        self.passage_texts = []  # Store passage texts for evaluation
+        self.query_texts = []    # Store query texts for evaluation
         
     def load_model(self):
         """Load the sentence transformer model"""
@@ -55,6 +57,7 @@ class VectorDataManager:
             logger.info("Using random embeddings for testing...")
             np.random.seed(42)
             embeddings = np.random.randn(num_vectors, self.vector_dim).astype('float32')
+            texts = [f"synthetic_text_{i}" for i in range(num_vectors)]
         else:
             if self.use_ms_marco:
                 logger.info(f"Generating {num_vectors} embeddings from MS MARCO dataset...")
@@ -72,7 +75,23 @@ class VectorDataManager:
         # Split into index and query sets
         split_idx = int(0.8 * num_vectors)
         index_embeddings = embeddings[:split_idx]
-        query_embeddings = embeddings[split_idx:split_idx + num_queries]
+        
+        # Store texts for evaluation
+        self.passage_texts = texts[:split_idx]  # Store passage texts
+        
+        # For MS MARCO, we need to extract actual query texts, not use passage texts as queries
+        if self.use_ms_marco:
+            self.query_texts = self._extract_query_texts(num_queries)
+            # Generate embeddings for the actual query texts
+            if self.model is not None:
+                query_embeddings = self.model.encode(self.query_texts, show_progress_bar=True, batch_size=32)
+                query_embeddings = query_embeddings / np.linalg.norm(query_embeddings, axis=1, keepdims=True)
+            else:
+                # Fallback to random embeddings
+                query_embeddings = np.random.randn(num_queries, self.vector_dim).astype('float32')
+        else:
+            self.query_texts = texts[split_idx:split_idx + num_queries]  # Store query texts
+            query_embeddings = embeddings[split_idx:split_idx + num_queries]
         
         self.embeddings = index_embeddings
         self.query_embeddings = query_embeddings
@@ -219,6 +238,31 @@ class VectorDataManager:
             texts.append(text)
         
         return texts
+    
+    def _extract_query_texts(self, num_queries: int) -> List[str]:
+        """Extract actual query texts from MS MARCO dataset"""
+        try:
+            from datasets import load_dataset
+            logger.info("Extracting query texts from MS MARCO dataset...")
+            
+            dataset = load_dataset("ms_marco", "v1.1", split="train", streaming=True)
+            query_texts = []
+            
+            for example in dataset:
+                if len(query_texts) >= num_queries:
+                    break
+                    
+                query_text = example.get('query', '').strip()
+                if query_text and len(query_text) > 5:  # Filter out very short queries
+                    query_texts.append(query_text)
+            
+            logger.info(f"Extracted {len(query_texts)} query texts from MS MARCO")
+            return query_texts
+            
+        except Exception as e:
+            logger.error(f"Failed to extract query texts: {e}")
+            # Fallback to synthetic queries
+            return [f"synthetic_query_{i}" for i in range(num_queries)]
     
     def compute_ground_truth(self, k: int = 10) -> np.ndarray:
         """Compute ground truth using numpy (FAISS alternative)"""

@@ -278,7 +278,14 @@ class MetricsCalculator:
     
     def get_results_dataframe(self) -> pd.DataFrame:
         """Get all results as a DataFrame"""
-        return pd.DataFrame([result.__dict__ for result in self.results])
+        # Handle both dict and object results
+        data = []
+        for result in self.results:
+            if isinstance(result, dict):
+                data.append(result)
+            else:
+                data.append(result.__dict__)
+        return pd.DataFrame(data)
     
     def save_results(self, filename: str = "results.csv"):
         """Save results to CSV file"""
@@ -354,3 +361,17 @@ class MetricsCalculator:
                     print(f"  Quality: N/A")
             else:
                 print(f"  Quality: N/A")
+            
+            # MS MARCO evaluation metrics
+            evaluation = db_results[db_results['operation'] == 'evaluation']
+            if not evaluation.empty:
+                print(f"  MS MARCO Evaluation:")
+                for metric in ['recall@1', 'recall@5', 'recall@10', 'recall@20', 'mrr']:
+                    metric_data = evaluation[evaluation['metric'] == metric]
+                    if not metric_data.empty:
+                        value = metric_data['value'].iloc[0]
+                        print(f"    {metric.upper()}: {value:.4f}")
+                    else:
+                        print(f"    {metric.upper()}: N/A")
+            else:
+                print(f"  MS MARCO Evaluation: N/A")
